@@ -1,3 +1,5 @@
+[![Python CI](https://github.com/Linshanruoshui/cognitive-bias-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/Linshanruoshui/cognitive-bias-analyzer/actions)
+
 # Cognitive Bias Analyzer 🧠
 ![Python CI](https://github.com/Linshanruoshui/cognitive-bias-analyzer/actions/workflows/ci.yml/badge.svg)
 
