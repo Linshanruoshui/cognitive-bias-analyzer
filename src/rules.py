@@ -1,94 +1,66 @@
-import re
-import spacy
+﻿import spacy
+from pydantic import BaseModel, Field
 from typing import List
-from src.schemas import BiasDetectionItem, DiagnosticReport
 
-nlp = spacy.load("en_core_web_sm")
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    import spacy.cli
+    spacy.cli.download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
-BIAS_TAXONOMY = [
+class BiasDetection(BaseModel):
+    bias_name: str
+    trigger_lemma: str
+    category: str
+    reframe_prompt: str
+
+class DiagnosticReport(BaseModel):
+    original_text: str
+    total_biases_found: int
+    detected_biases: List[BiasDetection] = Field(default_factory=list)
+
+BIAS_RULES = [
     {
-        "bias_name": "Sunk Cost Fallacy",
-        "category": "Decision-Making Heuristic",
-        "keywords": ["already", "invested", "spent", "waste", "put"],
-        "mechanism": "Focusing on past unrecoverable resources rather than future utility.",
-        "system_2_reframe": "If you had $0 and zero time invested as of today, would you still choose to pursue this?"
+        "name": "Availability Heuristic",
+        "trigger_lemmas": ["recently", "saw", "heard", "remember"],
+        "category": "Recall Bias",
+        "reframe": "Are you relying solely on recent or memorable examples rather than statistical baseline data?"
     },
     {
-        "bias_name": "Absolutism / Confirmation Bias",
-        "category": "Perceptual Shortcut",
-        "keywords": ["always", "never", "everyone", "nobody", "obviously", "clearly", "impossible"],
-        "mechanism": "Categorical overgeneralization that bypasses nuanced analysis of counter-evidence.",
-        "system_2_reframe": "What is one plausible scenario where the exact opposite of this assumption holds true?"
+        "name": "Catastrophizing",
+        "trigger_lemmas": ["disaster", "ruin", "terrible", "worst"],
+        "category": "Emotional Magnification",
+        "reframe": "What is the actual most realistic outcome versus this worst-case scenario?"
     },
     {
-        "bias_name": "Availability Heuristic",
-        "category": "Probability Judgment",
-        "keywords": ["recently", "saw", "heard", "friend", "yesterday", "lately", "anecdote"],
-        "mechanism": "Overestimating likelihood based on how easily a recent or vivid memory comes to mind.",
-        "system_2_reframe": "Is this pattern supported by broader statistical data, or primarily by a single recent memory?"
-    },
-    {
-        "bias_name": "Negativity Bias",
-        "category": "Affective Evaluation",
-        "keywords": ["disaster", "terrible", "worst", "ruin", "fail", "catastrophe", "dangerous"],
-        "mechanism": "Asymmetrically weighting negative risks over equivalent positive or neutral possibilities.",
-        "system_2_reframe": "If the worst-case scenario occurs, what is your concrete mitigation plan, and what is the best-case outcome?"
-    },
-    {
-        "bias_name": "Anchoring Bias",
-        "category": "Numerical/Baseline Judgment",
-        "keywords": ["originally", "initially", "starting", "baseline", "first", "quoted"],
-        "mechanism": "Fixating on an initial piece of information to judge subsequent estimates or value.",
-        "system_2_reframe": "If you ignored the original estimate completely, what would a fresh valuation look like from scratch?"
+        "name": "Overgeneralization",
+        "trigger_lemmas": ["always", "never", "everyone", "nobody", "obviously"],
+        "category": "Absolute Thinking",
+        "reframe": "Are there counterexamples or exceptions that contradict this absolute statement?"
     }
 ]
 
-URGENCY_PATTERNS = [
-    r"\b(must act now|limited time|before it's too late|don't miss out)\b",
-    r"\b(everyone is doing it|obviously|clearly|without a doubt)\b",
-]
-
 def analyze_text(text: str) -> DiagnosticReport:
-    """
-    Parses input text using spaCy and regex, evaluating against cognitive bias rules,
-    and returning a structured Pydantic DiagnosticReport.
-    """
     doc = nlp(text)
-    lemmas = [token.lemma_.lower() for token in doc if not token.is_punct]
-
-    detected_items: List[BiasDetectionItem] = []
-
-    # 1. Keyword/Lemma Matching
-    for rule in BIAS_TAXONOMY:
-        for keyword in rule["keywords"]:
-            if keyword in lemmas:
-                detected_items.append(
-                    BiasDetectionItem(
-                        bias_name=rule["bias_name"],
-                        trigger_lemma=keyword,
+    found_biases = []
+    
+    lemmas_in_text = [token.lemma_.lower() for token in doc]
+    
+    for rule in BIAS_RULES:
+        for trigger in rule["trigger_lemmas"]:
+            if trigger in lemmas_in_text:
+                found_biases.append(
+                    BiasDetection(
+                        bias_name=rule["name"],
+                        trigger_lemma=trigger,
                         category=rule["category"],
-                        reframe_prompt=rule["system_2_reframe"]
+                        reframe_prompt=rule["reframe"]
                     )
                 )
-                break
-
-    # 2. Regex Pattern Matching for Framed Urgency
-    text_lower = text.lower()
-    for pattern in URGENCY_PATTERNS:
-        match = re.search(pattern, text_lower)
-        if match:
-            detected_items.append(
-                BiasDetectionItem(
-                    bias_name="Framed Urgency / Bandwagon",
-                    trigger_lemma=match.group(0),
-                    category="Decision-Making Heuristic",
-                    reframe_prompt="Is this urgency driven by actual necessity, or artificial pressure?"
-                )
-            )
-            break
-
+    
     return DiagnosticReport(
-        input_text=text,
-        total_biases_found=len(detected_items),
-        detected_biases=detected_items
+        original_text=text,
+        total_biases_found=len(found_biases),
+        detected_biases=found_biases
     )
