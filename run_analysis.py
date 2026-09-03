@@ -34,7 +34,7 @@ def main():
 
     console.print(table)
 
-    # Optional: Print raw JSON output to demonstrate Pydantic serialization
+    # Print raw JSON output to demonstrate Pydantic serialization
     console.print("\n[bold dim]Serialized JSON Output (Pydantic Model):[/bold dim]")
     console.print(report.model_dump_json(indent=2))
 

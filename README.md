@@ -1,4 +1,5 @@
 # Cognitive Bias Analyzer 🧠
+![Python CI](https://github.com/Linshanruoshui/cognitive-bias-analyzer/actions/workflows/ci.yml/badge.svg)
 
 A lightweight, local NLP pipeline built with **spaCy**, **Pydantic**, and **Rich** to detect System 1 cognitive biases and generate metacognitive System 2 reframing prompts.
 

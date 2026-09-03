@@ -1,11 +1,10 @@
+import re
 import spacy
 from typing import List
 from src.schemas import BiasDetectionItem, DiagnosticReport
 
-# Load lightweight spaCy model
 nlp = spacy.load("en_core_web_sm")
 
-# Expanded Cognitive Bias Taxonomy
 BIAS_TAXONOMY = [
     {
         "bias_name": "Sunk Cost Fallacy",
@@ -44,17 +43,22 @@ BIAS_TAXONOMY = [
     }
 ]
 
+URGENCY_PATTERNS = [
+    r"\b(must act now|limited time|before it's too late|don't miss out)\b",
+    r"\b(everyone is doing it|obviously|clearly|without a doubt)\b",
+]
 
 def analyze_text(text: str) -> DiagnosticReport:
     """
-    Parses input text using spaCy, evaluates linguistic lemmas against rules,
-    and returns a structured Pydantic DiagnosticReport.
+    Parses input text using spaCy and regex, evaluating against cognitive bias rules,
+    and returning a structured Pydantic DiagnosticReport.
     """
     doc = nlp(text)
     lemmas = [token.lemma_.lower() for token in doc if not token.is_punct]
 
     detected_items: List[BiasDetectionItem] = []
 
+    # 1. Keyword/Lemma Matching
     for rule in BIAS_TAXONOMY:
         for keyword in rule["keywords"]:
             if keyword in lemmas:
@@ -67,6 +71,21 @@ def analyze_text(text: str) -> DiagnosticReport:
                     )
                 )
                 break
+
+    # 2. Regex Pattern Matching for Framed Urgency
+    text_lower = text.lower()
+    for pattern in URGENCY_PATTERNS:
+        match = re.search(pattern, text_lower)
+        if match:
+            detected_items.append(
+                BiasDetectionItem(
+                    bias_name="Framed Urgency / Bandwagon",
+                    trigger_lemma=match.group(0),
+                    category="Decision-Making Heuristic",
+                    reframe_prompt="Is this urgency driven by actual necessity, or artificial pressure?"
+                )
+            )
+            break
 
     return DiagnosticReport(
         input_text=text,
