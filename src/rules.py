@@ -1,4 +1,7 @@
-﻿import os
+﻿Set - Content - Path
+src / rules.py - Encoding
+utf8 - Value @ '
+import os
 import spacy
 import streamlit as st
 from pydantic import BaseModel, Field
@@ -8,16 +11,19 @@ from google.genai import types
 
 nlp = spacy.load("en_core_web_sm")
 
+
 class BiasDetection(BaseModel):
     bias_name: str = Field(description="Name of the cognitive bias or System 1 heuristic")
     trigger_lemma: str = Field(description="Key word, phrase, or concept triggering the bias")
     category: str = Field(description="General psychological category of the bias")
     reframe_prompt: str = Field(description="A System 2 reframing question to mitigate the bias")
 
+
 class DiagnosticReport(BaseModel):
     original_text: str
     total_biases_found: int
     detected_biases: List[BiasDetection] = Field(default_factory=list)
+
 
 BIAS_RULES = [
     {
@@ -40,29 +46,31 @@ BIAS_RULES = [
     }
 ]
 
+
 def _get_api_key() -> str:
     """Retrieve API key from Streamlit Cloud Secrets or local Environment Variables."""
     if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
         return st.secrets["GEMINI_API_KEY"]
     return os.environ.get("GEMINI_API_KEY", "")
 
+
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
     """Fallback LLM analysis for subtle, implicit System 1 heuristics."""
     api_key = _get_api_key()
     if not api_key:
-        print("GEMINI_API_KEY missing from both st.secrets and os.environ.")
+        st.warning("⚠️ Debug: GEMINI_API_KEY was not found in st.secrets or os.environ!")
         return []
 
     try:
         client = genai.Client(api_key=api_key)
         prompt = f"""
-        Analyze the following text for subtle System 1 cognitive biases, fallacies, or heuristics 
-        (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias, Optimism Bias).
-        Identify any implicit cognitive bias present in the text.
+        You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
+        Analyze the following text and identify implicit cognitive biases (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias).
+        Return a structured list of detected biases.
 
-        Text: "{text}"
+        Text to analyze: "{text}"
         """
-        
+
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=prompt,
@@ -72,18 +80,21 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
                 temperature=0.1,
             ),
         )
-        
+
         if response.parsed:
             return response.parsed
+        else:
+            st.info("ℹ️ Debug: API call succeeded, but the LLM evaluated no biases in this text.")
     except Exception as e:
-        print(f"LLM Fallback error: {e}")
+        st.error(f"❌ Debug: LLM Call Error - {e}")
     return []
+
 
 def analyze_text(text: str) -> DiagnosticReport:
     doc = nlp(text)
     found_biases = []
     lemmas_in_text = [token.lemma_.lower() for token in doc]
-    
+
     # 1. Fast local spaCy rule matching
     for rule in BIAS_RULES:
         for trigger in rule["trigger_lemmas"]:
@@ -96,13 +107,16 @@ def analyze_text(text: str) -> DiagnosticReport:
                         reframe_prompt=rule["reframe"]
                     )
                 )
-    
+
     # 2. LLM Fallback if no explicit local rules triggered
     if not found_biases:
         found_biases = _analyze_with_llm(text)
-    
+
     return DiagnosticReport(
         original_text=text,
         total_biases_found=len(found_biases),
         detected_biases=found_biases
     )
+
+
+'@
