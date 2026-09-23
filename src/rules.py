@@ -53,7 +53,7 @@ def _get_api_key() -> str:
 
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis with proper model fallback for google-genai SDK."""
+    """Fallback LLM analysis using explicit model path formatting."""
     api_key = _get_api_key()
     if not api_key:
         st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
@@ -68,11 +68,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Priority order of standard model aliases supported by google-genai SDK
+    # Fully qualified model identifiers required by google-genai SDK
     models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "models/gemini-2.5-flash",
+        "models/gemini-1.5-flash",
     ]
 
     last_error = ""
