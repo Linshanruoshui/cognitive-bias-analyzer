@@ -68,11 +68,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Model identifiers supported by the google-genai SDK
+    # 新しい SDK では `models/` プレフィックスが必須です
     models_to_try = [
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "models/gemini-2.5-flash",
+        "models/gemini-1.5-flash",
     ]
 
     last_error = ""
@@ -91,7 +90,6 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
             if response.parsed:
                 return response.parsed
             elif response.text:
-                # Fallback manual parse if parsed attribute is empty
                 import json
                 data = json.loads(response.text)
                 return [BiasDetection(**item) for item in data]
@@ -102,7 +100,6 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
 
     st.error(f"❌ Failed to reach Gemini API. Detailed error: {last_error}")
     return []
-
 
 def analyze_text(text: str) -> DiagnosticReport:
     doc = nlp(text)
