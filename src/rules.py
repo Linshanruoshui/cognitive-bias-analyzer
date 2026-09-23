@@ -53,10 +53,10 @@ def _get_api_key() -> str:
 
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis for subtle, implicit System 1 heuristics with retry logic."""
+    """Fallback LLM analysis for subtle, implicit System 1 heuristics."""
     api_key = _get_api_key()
     if not api_key:
-        st.warning("⚠️ Debug: GEMINI_API_KEY was not found in st.secrets or os.environ!")
+        st.warning("⚠️ GEMINI_API_KEY not configured.")
         return []
 
     client = genai.Client(api_key=api_key)
@@ -68,11 +68,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    max_retries = 3
-   
-    model_name = "gemini-2.5-flash"
+    # Use standard stable model name
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro"]
 
-    for attempt in range(max_retries):
+    for model_name in models_to_try:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -86,18 +85,12 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
 
             if response.parsed:
                 return response.parsed
-            else:
-                st.info("ℹ️ Debug: API call succeeded, but the LLM evaluated no biases in this text.")
-                return []
+            return []
         except Exception as e:
+            # If model name failed, try the next model in list
+            continue
 
-            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE"]) and attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 3  # 3秒, 6秒 待機
-                time.sleep(wait_time)
-                continue
-            st.error(f"❌ Debug: LLM Call Error - {e}")
-            break
-
+    st.error("❌ Failed to reach Gemini API with supported models.")
     return []
 
 
