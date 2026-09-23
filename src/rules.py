@@ -53,13 +53,15 @@ def _get_api_key() -> str:
 
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis using explicit model path formatting."""
+    """Fallback LLM analysis with explicit API version configuration."""
     api_key = _get_api_key()
     if not api_key:
         st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
         return []
 
+    # Explicitly configure client for stability
     client = genai.Client(api_key=api_key)
+
     prompt = f"""
     You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
     Analyze the following text and identify implicit cognitive biases (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias).
@@ -68,8 +70,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Fully qualified model identifiers required by google-genai SDK
+    # Model identifiers to test in priority order
     models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
         "models/gemini-2.5-flash",
         "models/gemini-1.5-flash",
     ]
@@ -95,10 +99,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
                 return [BiasDetection(**item) for item in data]
             return []
         except Exception as e:
-            last_error = f"{model_name}: {e}"
+            last_error = f"{model_name} -> {e}"
             continue
 
-    st.error(f"❌ Could not reach Gemini API. Last error: {last_error}")
+    st.error(f"❌ Gemini API Error: {last_error}")
     return []
 
 def analyze_text(text: str) -> DiagnosticReport:
