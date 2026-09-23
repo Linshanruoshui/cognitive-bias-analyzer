@@ -53,7 +53,7 @@ def _get_api_key() -> str:
 
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis with auto-discovered active model."""
+    """Fallback LLM analysis with proper model fallback for google-genai SDK."""
     api_key = _get_api_key()
     if not api_key:
         st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
@@ -68,46 +68,39 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # 1. Discover available models dynamically from your API key
-    selected_model = None
-    try:
-        for m in client.models.list():
-            # Find any model supporting content generation
-            if "generateContent" in getattr(m, "supported_generation_methods", []):
-                selected_model = m.name
-                # Prefer flash models if available
-                if "flash" in m.name:
-                    break
-    except Exception as e:
-        st.error(f"❌ Failed to list available models: {e}")
-        return []
+    # Priority order of standard model aliases supported by google-genai SDK
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
 
-    if not selected_model:
-        st.error("❌ No content-generating models found for this API key.")
-        return []
+    last_error = ""
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=list[BiasDetection],
+                    temperature=0.1,
+                ),
+            )
 
-    # 2. Call the dynamically discovered model
-    try:
-        response = client.models.generate_content(
-            model=selected_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=list[BiasDetection],
-                temperature=0.1,
-            ),
-        )
+            if response.parsed:
+                return response.parsed
+            elif response.text:
+                import json
+                data = json.loads(response.text)
+                return [BiasDetection(**item) for item in data]
+            return []
+        except Exception as e:
+            last_error = f"{model_name}: {e}"
+            continue
 
-        if response.parsed:
-            return response.parsed
-        elif response.text:
-            import json
-            data = json.loads(response.text)
-            return [BiasDetection(**item) for item in data]
-        return []
-    except Exception as e:
-        st.error(f"❌ LLM Call Error using model '{selected_model}': {e}")
-        return []
+    st.error(f"❌ Could not reach Gemini API. Last error: {last_error}")
+    return []
 
 def analyze_text(text: str) -> DiagnosticReport:
     doc = nlp(text)
