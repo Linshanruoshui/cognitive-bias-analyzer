@@ -1,46 +1,114 @@
-﻿import streamlit as st
-import pandas as pd
-from src.rules import analyze_text
+﻿import os
+import spacy
+import streamlit as st
+from pydantic import BaseModel, Field
+from typing import List
+import google.generativeai as genai
 
-st.set_page_config(
-    page_title="Cognitive Bias Analyzer",
-    page_icon="🧠",
-    layout="wide"
-)
+# Load spaCy model
+nlp = spacy.load("en_core_web_sm")
 
-st.title("🧠 Cognitive Bias Analyzer")
-st.write("Analyze text in real time to detect System 1 heuristics, overgeneralizations, and cognitive biases.")
+class BiasDetection(BaseModel):
+    bias_name: str = Field(description="Name of the cognitive bias or System 1 heuristic")
+    trigger_lemma: str = Field(description="Key word, phrase, or concept triggering the bias")
+    category: str = Field(description="General psychological category of the bias")
+    reframe_prompt: str = Field(description="A System 2 reframing question to mitigate the bias")
 
-default_sample = "I recently saw a project fail online, so changing our plan now will obviously lead to a complete disaster!"
-input_text = st.text_area("Enter input text below:", value=default_sample, height=120)
+class DiagnosticReport(BaseModel):
+    original_text: str
+    total_biases_found: int
+    detected_biases: List[BiasDetection] = Field(default_factory=list)
 
-if st.button("Run Diagnostic Report", type="primary"):
-    if input_text.strip():
-        report = analyze_text(input_text)
+BIAS_RULES = [
+    {
+        "name": "Availability Heuristic",
+        "trigger_lemmas": ["recently", "saw", "heard", "remember"],
+        "category": "Recall Bias",
+        "reframe": "Are you relying solely on recent or memorable examples rather than statistical baseline data?"
+    },
+    {
+        "name": "Catastrophizing",
+        "trigger_lemmas": ["disaster", "ruin", "terrible", "worst"],
+        "category": "Emotional Magnification",
+        "reframe": "What is the actual most realistic outcome versus this worst-case scenario?"
+    },
+    {
+        "name": "Overgeneralization",
+        "trigger_lemmas": ["always", "never", "everyone", "nobody", "obviously"],
+        "category": "Absolute Thinking",
+        "reframe": "Are there counterexamples or exceptions that contradict this absolute statement?"
+    }
+]
 
-        st.divider()
-        col1, col2 = st.columns(2)
-        col1.metric("Total Characters", len(input_text))
-        col2.metric("Biases Detected", report.total_biases_found)
+def _get_api_key() -> str:
+    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    return os.environ.get("GEMINI_API_KEY", "")
 
-        if report.total_biases_found == 0:
-            st.success("🎉 No explicit System 1 cognitive biases detected!")
-        else:
-            st.warning(f"Found {report.total_biases_found} bias trigger(s) in the text.")
+def _analyze_with_llm(text: str) -> List[BiasDetection]:
+    """Fallback LLM analysis using standard google-generativeai SDK."""
+    api_key = _get_api_key()
+    if not api_key:
+        st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
+        return []
 
-            table_data = []
-            for item in report.detected_biases:
-                table_data.append({
-                    "Bias Detected": item.bias_name,
-                    "Trigger Lemma": item.trigger_lemma,
-                    "Category": item.category,
-                    "System 2 Reframing Prompt": item.reframe_prompt
-                })
+    genai.configure(api_key=api_key)
 
-            df = pd.DataFrame(table_data)
-            st.dataframe(df, width="stretch")
+    prompt = f"""
+    You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
+    Analyze the following text and identify implicit cognitive biases (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias).
+    Return a structured JSON list of detected biases with keys: bias_name, trigger_lemma, category, reframe_prompt.
 
-            with st.expander("🔍 View Raw Pydantic Model Output (JSON)"):
-                st.json(report.model_dump_json())
-    else:
-        st.error("Please provide non-empty text to run the analysis.")
+    Text to analyze: "{text}"
+    """
+
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+
+    last_error = ""
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+
+            import json
+            data = json.loads(response.text)
+            return [BiasDetection(**item) for item in data]
+        except Exception as e:
+            last_error = f"{model_name}: {e}"
+            continue
+
+    st.error(f"❌ Gemini API Error: {last_error}")
+    return []
+
+def analyze_text(text: str) -> DiagnosticReport:
+    """Main entrypoint called by app.py"""
+    doc = nlp(text)
+    found_biases = []
+    lemmas_in_text = [token.lemma_.lower() for token in doc]
+
+    for rule in BIAS_RULES:
+        for trigger in rule["trigger_lemmas"]:
+            if trigger in lemmas_in_text:
+                found_biases.append(
+                    BiasDetection(
+                        bias_name=rule["name"],
+                        trigger_lemma=trigger,
+                        category=rule["category"],
+                        reframe_prompt=rule["reframe"]
+                    )
+                )
+
+    if not found_biases:
+        found_biases = _analyze_with_llm(text)
+
+    return DiagnosticReport(
+        original_text=text,
+        total_biases_found=len(found_biases),
+        detected_biases=found_biases
+    )
