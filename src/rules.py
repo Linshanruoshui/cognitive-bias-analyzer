@@ -53,7 +53,7 @@ def _get_api_key() -> str:
 
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis for subtle, implicit System 1 heuristics."""
+    """Fallback LLM analysis with auto-discovered active model."""
     api_key = _get_api_key()
     if not api_key:
         st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
@@ -68,38 +68,46 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # 新しい SDK では `models/` プレフィックスが必須です
-    models_to_try = [
-        "models/gemini-2.5-flash",
-        "models/gemini-1.5-flash",
-    ]
+    # 1. Discover available models dynamically from your API key
+    selected_model = None
+    try:
+        for m in client.models.list():
+            # Find any model supporting content generation
+            if "generateContent" in getattr(m, "supported_generation_methods", []):
+                selected_model = m.name
+                # Prefer flash models if available
+                if "flash" in m.name:
+                    break
+    except Exception as e:
+        st.error(f"❌ Failed to list available models: {e}")
+        return []
 
-    last_error = ""
-    for model_name in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=list[BiasDetection],
-                    temperature=0.1,
-                ),
-            )
+    if not selected_model:
+        st.error("❌ No content-generating models found for this API key.")
+        return []
 
-            if response.parsed:
-                return response.parsed
-            elif response.text:
-                import json
-                data = json.loads(response.text)
-                return [BiasDetection(**item) for item in data]
-            return []
-        except Exception as e:
-            last_error = f"{model_name}: {e}"
-            continue
+    # 2. Call the dynamically discovered model
+    try:
+        response = client.models.generate_content(
+            model=selected_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=list[BiasDetection],
+                temperature=0.1,
+            ),
+        )
 
-    st.error(f"❌ Failed to reach Gemini API. Detailed error: {last_error}")
-    return []
+        if response.parsed:
+            return response.parsed
+        elif response.text:
+            import json
+            data = json.loads(response.text)
+            return [BiasDetection(**item) for item in data]
+        return []
+    except Exception as e:
+        st.error(f"❌ LLM Call Error using model '{selected_model}': {e}")
+        return []
 
 def analyze_text(text: str) -> DiagnosticReport:
     doc = nlp(text)
