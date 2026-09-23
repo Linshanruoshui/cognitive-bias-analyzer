@@ -1,7 +1,4 @@
-﻿Set - Content - Path
-src / rules.py - Encoding
-utf8 - Value @ '
-import os
+﻿import os
 import spacy
 import streamlit as st
 from pydantic import BaseModel, Field
@@ -117,6 +114,3 @@ def analyze_text(text: str) -> DiagnosticReport:
         total_biases_found=len(found_biases),
         detected_biases=found_biases
     )
-
-
-'@
