@@ -56,7 +56,7 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     """Fallback LLM analysis for subtle, implicit System 1 heuristics."""
     api_key = _get_api_key()
     if not api_key:
-        st.warning("⚠️ GEMINI_API_KEY not configured.")
+        st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
         return []
 
     client = genai.Client(api_key=api_key)
@@ -68,9 +68,14 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Use standard stable model name
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro"]
+    # Model identifiers supported by the google-genai SDK
+    models_to_try = [
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
 
+    last_error = ""
     for model_name in models_to_try:
         try:
             response = client.models.generate_content(
@@ -85,12 +90,17 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
 
             if response.parsed:
                 return response.parsed
+            elif response.text:
+                # Fallback manual parse if parsed attribute is empty
+                import json
+                data = json.loads(response.text)
+                return [BiasDetection(**item) for item in data]
             return []
         except Exception as e:
-            # If model name failed, try the next model in list
+            last_error = f"{model_name}: {e}"
             continue
 
-    st.error("❌ Failed to reach Gemini API with supported models.")
+    st.error(f"❌ Failed to reach Gemini API. Detailed error: {last_error}")
     return []
 
 
