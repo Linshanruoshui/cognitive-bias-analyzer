@@ -1,5 +1,6 @@
 ﻿import os
 import spacy
+import streamlit as st
 from pydantic import BaseModel, Field
 from typing import List
 from google import genai
@@ -39,11 +40,17 @@ BIAS_RULES = [
     }
 ]
 
+def _get_api_key() -> str:
+    """Retrieve API key from Streamlit Cloud Secrets or local Environment Variables."""
+    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    return os.environ.get("GEMINI_API_KEY", "")
+
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis for subtle, implicit System 1 heuristics (Halo Effect, Social Proof, etc.)."""
-    api_key = os.environ.get("GEMINI_API_KEY")
+    """Fallback LLM analysis for subtle, implicit System 1 heuristics."""
+    api_key = _get_api_key()
     if not api_key:
-        print("GEMINI_API_KEY is not set.")
+        print("GEMINI_API_KEY missing from both st.secrets and os.environ.")
         return []
 
     try:
@@ -51,7 +58,7 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
         prompt = f"""
         Analyze the following text for subtle System 1 cognitive biases, fallacies, or heuristics 
         (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias, Optimism Bias).
-        If no bias exists, return an empty list.
+        Identify any implicit cognitive bias present in the text.
 
         Text: "{text}"
         """
@@ -90,7 +97,7 @@ def analyze_text(text: str) -> DiagnosticReport:
                     )
                 )
     
-    # 2. LLM Fallback if no explicit rules triggered
+    # 2. LLM Fallback if no explicit local rules triggered
     if not found_biases:
         found_biases = _analyze_with_llm(text)
     
