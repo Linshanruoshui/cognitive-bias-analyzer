@@ -69,7 +69,7 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
         """
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",  # gemini-2.0-flash から gemini-2.5-flash へ変更
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
