@@ -78,29 +78,44 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
         st.error(f"❌ Gemini API Error: {e}")
         return []
 
-def analyze_text(text: str) -> DiagnosticReport:
-    doc = nlp(text)
-    found_biases = []
-    lemmas_in_text = [token.lemma_.lower() for token in doc]
+def _analyze_with_llm(text: str) -> List[BiasDetection]:
+    """Fallback LLM analysis using standard google-generativeai SDK."""
+    api_key = _get_api_key()
+    if not api_key:
+        st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
+        return []
 
-    for rule in BIAS_RULES:
-        for trigger in rule["trigger_lemmas"]:
-            if trigger in lemmas_in_text:
-                found_biases.append(
-                    BiasDetection(
-                        bias_name=rule["name"],
-                        trigger_lemma=trigger,
-                        category=rule["category"],
-                        reframe_prompt=rule["reframe"]
-                    )
-                )
+    genai.configure(api_key=api_key)
 
-    if not found_biases:
-        found_biases = _analyze_with_llm(text)
+    prompt = f"""
+    You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
+    Analyze the following text and identify implicit cognitive biases (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias).
+    Return a structured JSON list of detected biases with keys: bias_name, trigger_lemma, category, reframe_prompt.
 
+    Text to analyze: "{text}"
+    """
 
-    return DiagnosticReport(
-        original_text=text,
-        total_biases_found=len(found_biases),
-        detected_biases=found_biases
-    )
+    # 旧SDKでは 'models/' プレフィックスを付けずに 'gemini-1.5-flash' と直接指定します
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+
+    last_error = ""
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+
+            import json
+            data = json.loads(response.text)
+            return [BiasDetection(**item) for item in data]
+        except Exception as e:
+            last_error = f"{model_name}: {e}"
+            continue
+
+    st.error(f"❌ Gemini API Error: {last_error}")
+    return []
