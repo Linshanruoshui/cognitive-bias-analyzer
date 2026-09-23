@@ -69,10 +69,13 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     """
 
     max_retries = 3
+   
+    model_name = "gemini-2.5-flash"
+
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model="gemini-3.6-flash",
+                model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -87,8 +90,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
                 st.info("ℹ️ Debug: API call succeeded, but the LLM evaluated no biases in this text.")
                 return []
         except Exception as e:
-            if "503" in str(e) and attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # Wait 1s, then 2s before retrying
+
+            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE"]) and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 3  # 3秒, 6秒 待機
+                time.sleep(wait_time)
                 continue
             st.error(f"❌ Debug: LLM Call Error - {e}")
             break
