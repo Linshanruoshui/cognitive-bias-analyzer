@@ -1,5 +1,6 @@
 ﻿import os
 import spacy
+import time
 import streamlit as st
 from pydantic import BaseModel, Field
 from typing import List
@@ -52,38 +53,46 @@ def _get_api_key() -> str:
 
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis for subtle, implicit System 1 heuristics."""
+    """Fallback LLM analysis for subtle, implicit System 1 heuristics with retry logic."""
     api_key = _get_api_key()
     if not api_key:
         st.warning("⚠️ Debug: GEMINI_API_KEY was not found in st.secrets or os.environ!")
         return []
 
-    try:
-        client = genai.Client(api_key=api_key)
-        prompt = f"""
-        You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
-        Analyze the following text and identify implicit cognitive biases (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias).
-        Return a structured list of detected biases.
+    client = genai.Client(api_key=api_key)
+    prompt = f"""
+    You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
+    Analyze the following text and identify implicit cognitive biases (e.g., Halo Effect, Appeal to Authority, Affect Heuristic, Confirmation Bias).
+    Return a structured list of detected biases.
 
-        Text to analyze: "{text}"
-        """
+    Text to analyze: "{text}"
+    """
 
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",  # Updated to gemini-3.6-flash
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=list[BiasDetection],
-                temperature=0.1,
-            ),
-        )
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=list[BiasDetection],
+                    temperature=0.1,
+                ),
+            )
 
-        if response.parsed:
-            return response.parsed
-        else:
-            st.info("ℹ️ Debug: API call succeeded, but the LLM evaluated no biases in this text.")
-    except Exception as e:
-        st.error(f"❌ Debug: LLM Call Error - {e}")
+            if response.parsed:
+                return response.parsed
+            else:
+                st.info("ℹ️ Debug: API call succeeded, but the LLM evaluated no biases in this text.")
+                return []
+        except Exception as e:
+            if "503" in str(e) and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # Wait 1s, then 2s before retrying
+                continue
+            st.error(f"❌ Debug: LLM Call Error - {e}")
+            break
+
     return []
 
 
