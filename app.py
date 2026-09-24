@@ -4,6 +4,7 @@ import streamlit as st
 from pydantic import BaseModel, Field
 from typing import List
 from google import genai
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # Page Configuration
 st.set_page_config(
@@ -11,15 +12,6 @@ st.set_page_config(
     page_icon="🧠",
     layout="wide"
 )
-
-# Safe spaCy model loading
-nlp = None
-try:
-    import spacy
-
-    nlp = spacy.load("en_core_web_sm")
-except Exception:
-    nlp = None
 
 
 class BiasDetection(BaseModel):
@@ -57,11 +49,25 @@ BIAS_RULES = [
 ]
 
 
-# Function MUST be defined before _analyze_with_llm uses it
 def _get_api_key() -> str:
     if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
         return st.secrets["GEMINI_API_KEY"]
     return os.environ.get("GEMINI_API_KEY", "")
+
+
+# Automatically retries on 503 high-demand traffic spikes up to 3 times
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=6),
+    reraise=True
+)
+def _call_gemini_api(client, model_name: str, prompt: str):
+    return client.models.generate_content(
+        model=model_name,
+        contents=prompt,
+        config={"response_mime_type": "application/json"}
+    )
+
 
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
     api_key = _get_api_key()
@@ -79,20 +85,16 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Strictly use active, supported model endpoints
+    # Active endpoints to cycle through if one fails
     models_to_try = [
-        "gemini-3.6-flash"
+        "gemini-3.6-flash",
+        "gemini-2.0-flash-exp"
     ]
 
     last_error = ""
     for model_name in models_to_try:
         try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config={"response_mime_type": "application/json"}
-            )
-
+            response = _call_gemini_api(client, model_name, prompt)
             data = json.loads(response.text)
             return [BiasDetection(**item) for item in data]
         except Exception as e:
@@ -105,16 +107,11 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
 
 def analyze_text(text: str) -> DiagnosticReport:
     found_biases = []
-
-    if nlp is not None:
-        doc = nlp(text)
-        lemmas_in_text = [token.lemma_.lower() for token in doc]
-    else:
-        lemmas_in_text = text.lower().split()
+    text_lower = text.lower()
 
     for rule in BIAS_RULES:
         for trigger in rule["trigger_lemmas"]:
-            if trigger in lemmas_in_text:
+            if trigger in text_lower:
                 found_biases.append(
                     BiasDetection(
                         bias_name=rule["name"],
@@ -134,7 +131,7 @@ def analyze_text(text: str) -> DiagnosticReport:
     )
 
 
-# --- STREAMLIT UI RENDER ---
+# --- STREAMLIT UI ---
 st.title("🧠 Cognitive Bias Analyzer")
 st.markdown("Analyze text for System 1 heuristics, emotional magnification, and absolute thinking.")
 
