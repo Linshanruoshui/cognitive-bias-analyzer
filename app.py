@@ -57,6 +57,12 @@ BIAS_RULES = [
 ]
 
 
+def _get_api_key() -> str:
+    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    return os.environ.get("GEMINI_API_KEY", "")
+
+
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
     api_key = _get_api_key()
     if not api_key:
