@@ -87,8 +87,7 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
 
     # Active endpoints to cycle through if one fails
     models_to_try = [
-        "gemini-3.6-flash",
-        "gemini-2.0-flash-exp"
+        "gemini-3.6-flash"
     ]
 
     last_error = ""
