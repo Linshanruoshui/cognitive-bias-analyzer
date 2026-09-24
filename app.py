@@ -63,7 +63,6 @@ def _get_api_key() -> str:
         return st.secrets["GEMINI_API_KEY"]
     return os.environ.get("GEMINI_API_KEY", "")
 
-
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
     api_key = _get_api_key()
     if not api_key:
@@ -80,11 +79,9 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Active Gemini Flash models for failover
+    # Strictly use active, supported model endpoints
     models_to_try = [
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-2.5-flash"
+        "gemini-3.6-flash"
     ]
 
     last_error = ""
