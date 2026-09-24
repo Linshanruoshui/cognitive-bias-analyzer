@@ -57,19 +57,12 @@ BIAS_RULES = [
 ]
 
 
-def _get_api_key() -> str:
-    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-        return st.secrets["GEMINI_API_KEY"]
-    return os.environ.get("GEMINI_API_KEY", "")
-
-
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
     api_key = _get_api_key()
     if not api_key:
         st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
         return []
 
-    # 新しい Client クラスを生成
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -80,9 +73,11 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # エラーメッセージ推奨の最新モデルを指定
+    # Priority order: If one model gives a 503 overload error, it immediately moves to the next
     models_to_try = [
+        "gemini-2.5-flash",
         "gemini-3.6-flash",
+        "gemini-1.5-flash"
     ]
 
     last_error = ""
@@ -98,7 +93,7 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
             return [BiasDetection(**item) for item in data]
         except Exception as e:
             last_error = f"{model_name}: {e}"
-            continue
+            continue  # Automatically failover to the next model in the list
 
     st.error(f"❌ Gemini API Error Details: {last_error}")
     return []
