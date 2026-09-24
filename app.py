@@ -78,20 +78,32 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    for model_name in ["gemini-1.5-flash", "gemini-1.5-pro"]:
+    # Updated list of models to try (includes newest models and fallback aliases)
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro-latest"
+    ]
+
+    last_error = ""
+    for model_name in models_to_try:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"}
             )
+
             import json
             data = json.loads(response.text)
             return [BiasDetection(**item) for item in data]
         except Exception as e:
+            last_error = f"Model '{model_name}': {e}"
             continue
 
-    st.error("❌ Failed to reach Gemini API.")
+    # Display the actual detailed error in the UI for quick debugging
+    st.error(f"❌ Gemini API Error Details: {last_error}")
     return []
 
 
