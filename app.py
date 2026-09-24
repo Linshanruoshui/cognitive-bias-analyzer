@@ -78,12 +78,12 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Updated list of models to try (includes newest models and fallback aliases)
+    # Model priority list based on active models in AI Studio
     models_to_try = [
         "gemini-2.5-flash",
+        "gemini-1.5-flash",
         "gemini-2.0-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro-latest"
+        "gemini-pro"
     ]
 
     last_error = ""
@@ -102,7 +102,6 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
             last_error = f"Model '{model_name}': {e}"
             continue
 
-    # Display the actual detailed error in the UI for quick debugging
     st.error(f"❌ Gemini API Error Details: {last_error}")
     return []
 
