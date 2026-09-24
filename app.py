@@ -79,13 +79,10 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # 利用可能な最新のモデルID候補リスト
+    # 現在サポートされている最新の推奨モデル指定
     models_to_try = [
-        "gemini-2.0-flash-exp",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash-8b",
-        "gemini-1.5-pro",
-        "models/gemini-2.0-flash"
+        "gemini-3.6-flash",
+        "gemini-2.5-flash"
     ]
 
     last_error = ""
