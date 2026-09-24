@@ -32,7 +32,16 @@ st.set_page_config(
 # temporarily try another currently supported model.
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 
-MAX_RETRIES = 3
+# If one model is temporarily overloaded, automatically
+# try another current Flash model.
+GEMINI_FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+]
+
+MAX_RETRIES_PER_MODEL = 2
 INITIAL_RETRY_DELAY = 1.5
 
 
@@ -270,19 +279,21 @@ def _is_retryable_error(error: Exception) -> bool:
 def _analyze_with_gemini(
     text: str,
 ) -> tuple[Optional[List[BiasDetection]], Optional[str]]:
+
     """
     Analyze text using Gemini.
 
+    If the selected model is temporarily unavailable, the function
+    retries it and then automatically falls back to other supported
+    Flash models.
+
     Returns:
-        (bias_list, None) on success
 
-    OR:
+        (bias_list, None)
+            = successful analysis
 
-        (None, error_message) on failure
-
-    IMPORTANT:
-    Returning None on failure allows the rest of the application
-    to distinguish "no biases found" from "AI analysis failed".
+        (None, error_message)
+            = analysis failed
     """
 
     api_key = get_api_key()
@@ -293,8 +304,6 @@ def _analyze_with_gemini(
             "GEMINI_API_KEY is not configured. "
             "Add it to Streamlit Secrets or your environment variables.",
         )
-
-    model_name = get_model_name()
 
     try:
         client = genai.Client(api_key=api_key)
@@ -312,7 +321,8 @@ heuristics.
 
 Look for both explicit and implicit reasoning errors.
 
-Examples include:
+Possible examples include:
+
 - Halo Effect
 - Affect Heuristic
 - Appeal to Authority
@@ -338,98 +348,186 @@ Examples include:
 
 Important instructions:
 
-1. Only identify a bias when there is meaningful evidence in the text.
+1. Only identify a bias when there is meaningful evidence.
 2. Do not invent a bias merely because one is theoretically possible.
-3. Distinguish between a person's positive description of someone
-   and an actual inference based on that description.
-4. For every detected bias, identify the relevant word, phrase,
-   or reasoning pattern.
-5. Give a short System 2 reframing question.
-6. If no meaningful bias is present, return an empty list.
-7. Return ONLY the structured response requested by the schema.
+3. Distinguish descriptions from actual reasoning errors.
+4. Identify the specific word, phrase, or reasoning pattern
+   associated with each detected bias.
+5. Give a concise System 2 reframing question.
+6. If there is no meaningful cognitive bias, return an empty list.
+7. Return only the structured response requested by the schema.
 
 Text to analyze:
 
 {text}
 """
 
-    last_error = None
+    # --------------------------------------------------------
+    # Build model list.
+    #
+    # If GEMINI_MODEL is explicitly configured, try it first.
+    # Then use the fallback models.
+    # --------------------------------------------------------
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": BiasDetectionResponse,
-                },
-            )
+    configured_model = get_model_name()
 
-            # The current google-genai SDK can provide parsed structured
-            # output when a Pydantic schema is supplied.
-            parsed = getattr(response, "parsed", None)
+    models_to_try = [configured_model]
 
-            if parsed is not None:
-                if isinstance(parsed, BiasDetectionResponse):
-                    return parsed.detected_biases, None
+    for model in GEMINI_FALLBACK_MODELS:
+        if model not in models_to_try:
+            models_to_try.append(model)
 
-                # Defensive handling in case the SDK returns a
-                # compatible object rather than the exact Pydantic type.
-                try:
-                    parsed_report = BiasDetectionResponse.model_validate(
-                        parsed
-                    )
-                    return parsed_report.detected_biases, None
-                except Exception:
-                    pass
+    errors = []
 
-            # Fallback: validate the raw JSON response ourselves.
-            response_text = getattr(response, "text", None)
+    # --------------------------------------------------------
+    # Try each model
+    # --------------------------------------------------------
 
-            if not response_text:
-                return (
-                    None,
-                    "Gemini returned an empty response.",
-                )
+    for model_name in models_to_try:
+
+        for attempt in range(MAX_RETRIES_PER_MODEL):
 
             try:
-                parsed_report = BiasDetectionResponse.model_validate_json(
-                    response_text
+
+                st.caption(
+                    f"Using Gemini model: `{model_name}`"
                 )
-                return parsed_report.detected_biases, None
-            except Exception as parse_error:
-                return (
+
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": BiasDetectionResponse,
+                    },
+                )
+
+                # ------------------------------------------------
+                # Structured response
+                # ------------------------------------------------
+
+                parsed = getattr(response, "parsed", None)
+
+                if parsed is not None:
+
+                    if isinstance(
+                        parsed,
+                        BiasDetectionResponse,
+                    ):
+                        return (
+                            parsed.detected_biases,
+                            None,
+                        )
+
+                    try:
+
+                        parsed_report = (
+                            BiasDetectionResponse.model_validate(
+                                parsed
+                            )
+                        )
+
+                        return (
+                            parsed_report.detected_biases,
+                            None,
+                        )
+
+                    except Exception:
+                        pass
+
+                # ------------------------------------------------
+                # Fallback to raw JSON
+                # ------------------------------------------------
+
+                response_text = getattr(
+                    response,
+                    "text",
                     None,
-                    f"Gemini returned an unexpected response format: "
-                    f"{parse_error}",
                 )
 
-        except Exception as e:
-            last_error = e
+                if not response_text:
 
-            # Retry only when the error appears temporary.
-            if _is_retryable_error(e) and attempt < MAX_RETRIES - 1:
-                delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                    errors.append(
+                        f"{model_name}: empty response"
+                    )
 
-                # Small deterministic jitter so retries aren't perfectly
-                # synchronized if several requests happen together.
-                jitter = 0.25 * attempt
+                    break
 
-                time.sleep(delay + jitter)
-                continue
+                try:
 
-            break
+                    parsed_report = (
+                        BiasDetectionResponse.model_validate_json(
+                            response_text
+                        )
+                    )
 
-    if last_error is None:
-        return None, "Unknown Gemini error."
+                    return (
+                        parsed_report.detected_biases,
+                        None,
+                    )
+
+                except Exception as parse_error:
+
+                    errors.append(
+                        f"{model_name}: invalid response format: "
+                        f"{parse_error}"
+                    )
+
+                    break
+
+            except Exception as e:
+
+                error_text = str(e)
+
+                errors.append(
+                    f"{model_name}: {error_text}"
+                )
+
+                # --------------------------------------------
+                # Determine whether retry makes sense
+                # --------------------------------------------
+
+                if _is_retryable_error(e):
+
+                    if attempt < MAX_RETRIES_PER_MODEL - 1:
+
+                        delay = (
+                            INITIAL_RETRY_DELAY
+                            * (2 ** attempt)
+                        )
+
+                        time.sleep(delay)
+
+                        continue
+
+                    # This model appears temporarily unavailable.
+                    # Move to the next model.
+                    break
+
+                else:
+
+                    # Non-transient error.
+                    # For example, malformed request or authentication.
+                    #
+                    # Trying another model won't normally fix that,
+                    # so stop immediately.
+                    return (
+                        None,
+                        f"Gemini API error using "
+                        f"`{model_name}`: {error_text}",
+                    )
+
+    # --------------------------------------------------------
+    # Every model failed
+    # --------------------------------------------------------
+
+    error_summary = "\n\n".join(errors)
 
     return (
         None,
-        f"Gemini API request failed after "
-        f"{MAX_RETRIES} attempt(s): {last_error}",
+        "Gemini analysis failed after trying multiple models.\n\n"
+        + error_summary,
     )
-
 
 # ============================================================
 # MAIN ANALYSIS PIPELINE
