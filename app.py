@@ -1,8 +1,9 @@
 ﻿import os
+import json
 import streamlit as st
 from pydantic import BaseModel, Field
 from typing import List
-import google.generativeai as genai
+from google import genai
 
 # Page Configuration
 st.set_page_config(
@@ -68,7 +69,7 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
         st.warning("⚠️ GEMINI_API_KEY not configured in Streamlit Secrets.")
         return []
 
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     prompt = f"""
     You are an expert cognitive psychology system analyzing text for System 1 cognitive biases.
@@ -78,31 +79,28 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # Model priority list based on active models in AI Studio
     models_to_try = [
         "gemini-2.5-flash",
-        "gemini-1.5-flash",
         "gemini-2.0-flash",
-        "gemini-pro"
+        "gemini-1.5-flash"
     ]
 
     last_error = ""
     for model_name in models_to_try:
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config={"response_mime_type": "application/json"}
             )
 
-            import json
             data = json.loads(response.text)
             return [BiasDetection(**item) for item in data]
         except Exception as e:
-            last_error = f"Model '{model_name}': {e}"
+            last_error = f"{model_name}: {e}"
             continue
 
-    st.error(f"❌ Gemini API Error Details: {last_error}")
+    st.error(f"❌ Gemini API Error: {last_error}")
     return []
 
 
@@ -143,7 +141,7 @@ st.markdown("Analyze text for System 1 heuristics, emotional magnification, and 
 
 input_text = st.text_area(
     "Input Text to Analyze:",
-    value="Recently I saw a news report about plane crashes, and now I feel terrible about flying. Everyone knows it is a disaster waiting to happen.",
+    value="She is so kind and well-spoken, so there is no doubt her software architecture will be reliable.",
     height=150
 )
 
