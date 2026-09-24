@@ -66,9 +66,10 @@ def _get_api_key() -> str:
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
     api_key = _get_api_key()
     if not api_key:
-        st.warning("⚠️ GEMINI_API_KEY not configured in Streamlit Secrets.")
+        st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
         return []
 
+    # 新しい Client クラスを生成
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -79,10 +80,9 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    # 現在サポートされている最新の推奨モデル指定
+    # エラーメッセージ推奨の最新モデルを指定
     models_to_try = [
         "gemini-3.6-flash",
-        "gemini-2.5-flash"
     ]
 
     last_error = ""
