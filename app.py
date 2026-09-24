@@ -1,12 +1,25 @@
 ﻿import os
-import spacy
 import streamlit as st
 from pydantic import BaseModel, Field
 from typing import List
 import google.generativeai as genai
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+# Page Configuration
+st.set_page_config(
+    page_title="Cognitive Bias Analyzer",
+    page_icon="🧠",
+    layout="wide"
+)
+
+# Safe spaCy model loading
+nlp = None
+try:
+    import spacy
+
+    nlp = spacy.load("en_core_web_sm")
+except Exception:
+    nlp = None
+
 
 class BiasDetection(BaseModel):
     bias_name: str = Field(description="Name of the cognitive bias or System 1 heuristic")
@@ -14,10 +27,12 @@ class BiasDetection(BaseModel):
     category: str = Field(description="General psychological category of the bias")
     reframe_prompt: str = Field(description="A System 2 reframing question to mitigate the bias")
 
+
 class DiagnosticReport(BaseModel):
     original_text: str
     total_biases_found: int
     detected_biases: List[BiasDetection] = Field(default_factory=list)
+
 
 BIAS_RULES = [
     {
@@ -40,16 +55,17 @@ BIAS_RULES = [
     }
 ]
 
+
 def _get_api_key() -> str:
     if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
         return st.secrets["GEMINI_API_KEY"]
     return os.environ.get("GEMINI_API_KEY", "")
 
+
 def _analyze_with_llm(text: str) -> List[BiasDetection]:
-    """Fallback LLM analysis using standard google-generativeai SDK."""
     api_key = _get_api_key()
     if not api_key:
-        st.warning("⚠️ GEMINI_API_KEY not configured in Secrets or environment.")
+        st.warning("⚠️ GEMINI_API_KEY not configured in Streamlit Secrets.")
         return []
 
     genai.configure(api_key=api_key)
@@ -62,35 +78,31 @@ def _analyze_with_llm(text: str) -> List[BiasDetection]:
     Text to analyze: "{text}"
     """
 
-    models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-    ]
-
-    last_error = ""
-    for model_name in models_to_try:
+    for model_name in ["gemini-1.5-flash", "gemini-1.5-pro"]:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"}
             )
-
             import json
             data = json.loads(response.text)
             return [BiasDetection(**item) for item in data]
         except Exception as e:
-            last_error = f"{model_name}: {e}"
             continue
 
-    st.error(f"❌ Gemini API Error: {last_error}")
+    st.error("❌ Failed to reach Gemini API.")
     return []
 
+
 def analyze_text(text: str) -> DiagnosticReport:
-    """Main entrypoint called by app.py"""
-    doc = nlp(text)
     found_biases = []
-    lemmas_in_text = [token.lemma_.lower() for token in doc]
+
+    if nlp is not None:
+        doc = nlp(text)
+        lemmas_in_text = [token.lemma_.lower() for token in doc]
+    else:
+        lemmas_in_text = text.lower().split()
 
     for rule in BIAS_RULES:
         for trigger in rule["trigger_lemmas"]:
@@ -112,3 +124,31 @@ def analyze_text(text: str) -> DiagnosticReport:
         total_biases_found=len(found_biases),
         detected_biases=found_biases
     )
+
+
+# --- STREAMLIT UI RENDER ---
+st.title("🧠 Cognitive Bias Analyzer")
+st.markdown("Analyze text for System 1 heuristics, emotional magnification, and absolute thinking.")
+
+input_text = st.text_area(
+    "Input Text to Analyze:",
+    value="Recently I saw a news report about plane crashes, and now I feel terrible about flying. Everyone knows it is a disaster waiting to happen.",
+    height=150
+)
+
+if st.button("Run Diagnostic Report", type="primary"):
+    if not input_text.strip():
+        st.warning("Please enter text to analyze.")
+    else:
+        with st.spinner("Analyzing text for cognitive biases..."):
+            report = analyze_text(input_text)
+
+        st.subheader(f"Results: {report.total_biases_found} Bias(es) Detected")
+
+        if report.detected_biases:
+            for idx, bias in enumerate(report.detected_biases, 1):
+                with st.expander(f"{idx}. {bias.bias_name} ({bias.category})", expanded=True):
+                    st.write(f"**Trigger Word / Concept:** `{bias.trigger_lemma}`")
+                    st.info(f"**System 2 Reframe Question:** {bias.reframe_prompt}")
+        else:
+            st.success("No obvious cognitive biases detected in the provided text.")
